@@ -2,14 +2,14 @@
 
 import argparse
 import logging
-import mysql.connector
+import psycopg2
 import splunklib.client as client
 
 class ZabbixAudit(object):
     """ Object wrapper to get audit info from zabbix """
 
     def __init__(self, zabbixdb_conf, continueFrom):
-        self.db = mysql.connector.connect(**zabbixdb_conf)
+        self.db = psycopg2.connect(**zabbixdb_conf)
         self.dbc = self.db.cursor()
         self.sp_name = 'get_audit'
         if not self._is_sp_exist(self.sp_name):
@@ -17,74 +17,83 @@ class ZabbixAudit(object):
 
     def _is_sp_exist(self, name):
         """ Return True if stored procudure exist, otherwise return False """
-
-        self.dbc.nextset()
-        self.dbc.execute("show procedure status where NAME='{name}';".format(
+        self.dbc.execute("SELECT prosrc FROM pg_proc WHERE proname='{name}';".format(
             name=name))
         return bool(self.dbc.fetchall())
 
     def _create_sp(self, name):
         """ Create stored procedure with given name """
-
-        self.dbc.nextset()
         get_audit_sp = """
-        CREATE DEFINER=`zabbix`@`%` PROCEDURE `{name}`(IN lastSelect INT)
-        BEGIN
-                SET lastSelect = IFNULL(lastSelect,0);
-                SELECT from_unixtime(`a1`.`clock`, '%Y/%m/%d %h:%i:%s %p PDT'),
-                                `u`.`alias`,
-                                `a1`.`ip`,
-                                CASE `a1`.`action`
-                                        WHEN 0 THEN 'add'
-                                        WHEN 1 THEN 'update'
-                                        WHEN 2 THEN 'delete'
-                                        WHEN 3 THEN 'login'
-                                        WHEN 4 THEN 'logout'
-                                        WHEN 5 THEN 'enable'
-                                        WHEN 6 THEN 'disable'
-                                END as `action`,
-                                CASE `a1`.`resourcetype`
-                                        WHEN 0 THEN 'User'
-                                        WHEN 11 THEN 'User group'
-                                        WHEN 12 THEN 'Application'
-                                        WHEN 13 THEN 'Trigger'
-                                        WHEN 14 THEN 'Host group'
-                                        WHEN 15 THEN 'Item'
-                                        WHEN 16 THEN 'Image'
-                                        WHEN 17 THEN 'Value map'
-                                        WHEN 18 THEN 'IT service'
-                                        WHEN 19 THEN 'Map'
-                                        WHEN 2 THEN 'Configuration of Zabbix'
-                                        WHEN 20 THEN 'Screen'
-                                        WHEN 21 THEN 'Node'
-                                        WHEN 22 THEN 'Scenario'
-                                        WHEN 23 THEN 'Discovery rule'
-                                        WHEN 24 THEN 'Slide show'
-                                        WHEN 25 THEN 'Script'
-                                        WHEN 26 THEN 'Proxy'
-                                        WHEN 27 THEN 'Maintenance'
-                                        WHEN 28 THEN 'Regular expression'
-                                        WHEN 29 THEN 'Macro'
-                                        WHEN 3 THEN 'Media type'
-                                        WHEN 30 THEN 'Template'
-                                        WHEN 31 THEN 'Trigger prototype'
-                                        WHEN 4 THEN 'Host'
-                                        WHEN 5 THEN 'Action'
-                                        WHEN 6 THEN 'Graph'
-                                        WHEN 7 THEN 'Graph element'
-                                END as `resourcetype`,
-                                COALESCE(NULLIF(`a1`.`resourcename`, ''),`a1`.`details`) as `name`,
-                                `a2`.`oldvalue`,
-                                `a2`.`newvalue`,
-                                `a1`.`auditid`
-                FROM `auditlog` AS `a1`
-                LEFT JOIN `auditlog_details` AS `a2`
-                ON `a1`.`auditid`=`a2`.`auditid`
-                LEFT JOIN `users` AS `u`
-                ON `a1`.`userid`=`u`.`userid`
-                WHERE `a1`.`auditid` > lastSelect
-                ORDER BY `a1`.`auditid` DESC;
-        END;""".format(name=name)
+                    CREATE OR REPLACE FUNCTION {name} (IN lastSelect INT) RETURNS 
+                    table (
+                        action_datetime TIMESTAMP WITH TIME ZONE,
+                        alias varchar(100),
+                        ip varchar(39),
+                        action text,
+                        resourcetype text,
+                        name text,
+                        oldvalue text,
+                        newvalue text,
+                        auditid bigint
+                    )
+                    AS $$
+                    BEGIN
+                    RETURN QUERY(SELECT to_timestamp(a1.clock) AS action_datetime,
+                                                    u.alias,
+                                                    a1.ip,
+                                                    CASE a1.action
+                                                            WHEN 0 THEN 'add'
+                                                            WHEN 1 THEN 'update'
+                                                            WHEN 2 THEN 'delete'
+                                                            WHEN 3 THEN 'login'
+                                                            WHEN 4 THEN 'logout'
+                                                            WHEN 5 THEN 'enable'
+                                                            WHEN 6 THEN 'disable'
+                                                    END as action,
+                                                    CASE a1.resourcetype
+                                                            WHEN 0 THEN 'User'
+                                                            WHEN 11 THEN 'User group'
+                                                            WHEN 12 THEN 'Application'
+                                                            WHEN 13 THEN 'Trigger'
+                                                            WHEN 14 THEN 'Host group'
+                                                            WHEN 15 THEN 'Item'
+                                                            WHEN 16 THEN 'Image'
+                                                            WHEN 17 THEN 'Value map'
+                                                            WHEN 18 THEN 'IT service'
+                                                            WHEN 19 THEN 'Map'
+                                                            WHEN 2 THEN 'Configuration of Zabbix'
+                                                            WHEN 20 THEN 'Screen'
+                                                            WHEN 21 THEN 'Node'
+                                                            WHEN 22 THEN 'Scenario'
+                                                            WHEN 23 THEN 'Discovery rule'
+                                                            WHEN 24 THEN 'Slide show'
+                                                            WHEN 25 THEN 'Script'
+                                                            WHEN 26 THEN 'Proxy'
+                                                            WHEN 27 THEN 'Maintenance'
+                                                            WHEN 28 THEN 'Regular expression'
+                                                            WHEN 29 THEN 'Macro'
+                                                            WHEN 3 THEN 'Media type'
+                                                            WHEN 30 THEN 'Template'
+                                                            WHEN 31 THEN 'Trigger prototype'
+                                                            WHEN 4 THEN 'Host'
+                                                            WHEN 5 THEN 'Action'
+                                                            WHEN 6 THEN 'Graph'
+                                                            WHEN 7 THEN 'Graph element'
+                                                    END as resourcetype,
+                                                    COALESCE(NULLIF(a1.resourcename, ''),a1.details) as name,
+                                                    a2.oldvalue,
+                                                    a2.newvalue,
+                                                    a1.auditid
+                                    FROM auditlog AS a1
+                                    LEFT JOIN auditlog_details AS a2
+                                    ON a1.auditid=a2.auditid
+                                    LEFT JOIN users AS u
+                                    ON a1.userid=u.userid
+                                    WHERE a1.auditid > lastSelect
+                                    ORDER BY a1.auditid DESC);
+                                            
+                    END; $$ LANGUAGE plpgsql;
+        """.format(name=name)
         self.dbc.execute(get_audit_sp)
 
     def __enter__(self):
@@ -96,11 +105,11 @@ class ZabbixAudit(object):
     def read(self):
         """ Return list of tuples with audit records """
 
-        self.dbc.nextset()
         self.dbc.callproc(self.sp_name, [continueFrom])
+
         result = []
-        for res in self.dbc.stored_results():
-            result.extend(res.fetchall())
+        #for res in self.dbc.stored_results():
+        result.extend(self.dbc.fetchall())
         return result
 
 class SplunkIndex(object):
@@ -122,15 +131,14 @@ class SplunkIndex(object):
 
     def write(self, data):
         """ Write data to splunk index, and return last written actionid """
-
         result = 0
         for row in data:
             text = "date='{0}', account='{1}', ip='{2}', action='{3}', type='{4}', name='{5}'".format(*row)
             if len(row) > 6 and not None in row[6:7]:
                 text += ", old='{6}', new='{7}'".format(*row)
             log.info(text)
-            text += "\r\n"
-            self.socket.send(text)
+            text += " \r\n"
+            self.socket.send(text.encode())
             result = data[0][len(data[0])-1]
         return result
 
