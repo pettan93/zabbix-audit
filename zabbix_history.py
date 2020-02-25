@@ -56,8 +56,8 @@ class ZabbixAudit(object):
                                                 LEFT JOIN items i ON hi.itemid = i.itemid
                                                 LEFT JOIN hosts ho ON ho.hostid = i.hostid
                                                 WHERE ho.hostid = hostIdparam
+						limit 10
                                             );
-                                                        
             END; $$ LANGUAGE plpgsql;
         """.format(name=name)
         self.dbc.execute(get_audit_sp)
@@ -193,7 +193,7 @@ if __name__ == '__main__':
     with ZabbixAudit(zabbixdb_conf,zabbixhost_conf, continueFrom) as db:
         with SplunkIndex(splunk_conf, splunk_evt, splunk_index) as splunk:
             data = db.read()
-            #continueFrom = splunk.write(data)
+            continueFrom = splunk.write(data)
             log.info('%d events was added to splunk index[%s]', len(data), splunk_index)
 
             if continueFrom:
