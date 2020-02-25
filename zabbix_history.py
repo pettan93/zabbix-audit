@@ -6,7 +6,7 @@ import psycopg2
 import splunklib.client as client
 
 class ZabbixAudit(object):
-    """ Object wrapper to get audit info from zabbix """
+    """ Object wrapper to get history info from zabbix """
 
     def __init__(self, zabbixdb_conf,zabbixhost_conf, continueFrom):
         self.db = psycopg2.connect(**zabbixdb_conf)
@@ -23,7 +23,7 @@ class ZabbixAudit(object):
 
     def _create_sp(self, name):
         """ Create stored procedure with given name """
-        get_audit_sp = """
+        get_history_sp = """
             CREATE OR REPLACE FUNCTION {name} (IN hostIdparam INT) RETURNS 
                                 table (
                                     clock TIMESTAMP WITH TIME ZONE,
@@ -56,11 +56,11 @@ class ZabbixAudit(object):
                                                 LEFT JOIN items i ON hi.itemid = i.itemid
                                                 LEFT JOIN hosts ho ON ho.hostid = i.hostid
                                                 WHERE ho.hostid = hostIdparam
-						limit 10
+						                        limit 10
                                             );
             END; $$ LANGUAGE plpgsql;
         """.format(name=name)
-        self.dbc.execute(get_audit_sp)
+        self.dbc.execute(get_history_sp)
 
     def __enter__(self):
         return self
@@ -69,7 +69,7 @@ class ZabbixAudit(object):
         self.db.close()
 
     def read(self):
-        """ Return list of tuples with audit records """
+        """ Return list of tuples with history records """
 
         self.dbc.callproc(self.sp_name, [zabbixhost_conf['zhostid']])
 
@@ -99,9 +99,7 @@ class SplunkIndex(object):
         """ Write data to splunk index, and return last written actionid """
         result = 0
         for row in data:
-            text = "date='{0}', account='{1}', ip='{2}', action='{3}', type='{4}', name='{5}'".format(*row)
-            if len(row) > 6 and not None in row[6:7]:
-                text += ", old='{6}', new='{7}'".format(*row)
+            text = "date='{0}', hostName='{1}', itemId='{2}', value='{3}', itemUnits='{4}', itemType='{5}', itemName='{6}', itemKey='{7}', itemDelay='{8}', itemHistory='{9}',itemValueType='{10}'".format(*row)
             log.info(text)
             text += " \r\n"
             self.socket.send(text.encode())
@@ -182,14 +180,14 @@ if __name__ == '__main__':
     splunk_index = args['sindex']
 
     # Load actionid from which we should continue work.
-    tmpFile = '/tmp/zabbixaudit'
+    tmpFile = '/tmp/zabbixhistory'
     if 'continue' in args and args['continue'] != None:
         continueFrom = args['continue']
     else:
         continueFrom = loadFromFile(tmpFile)
     log.info('Continue from event %d', continueFrom)
 
-    # Get audit log from zabbix and send it to splunk
+    # Get history log from zabbix and send it to splunk
     with ZabbixAudit(zabbixdb_conf,zabbixhost_conf, continueFrom) as db:
         with SplunkIndex(splunk_conf, splunk_evt, splunk_index) as splunk:
             data = db.read()
