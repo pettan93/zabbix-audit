@@ -56,7 +56,6 @@ class ZabbixAudit(object):
                                                 LEFT JOIN items i ON hi.itemid = i.itemid
                                                 LEFT JOIN hosts ho ON ho.hostid = i.hostid
                                                 WHERE ho.hostid = hostIdparam
-						                        limit 10
                                             );
             END; $$ LANGUAGE plpgsql;
         """.format(name=name)
